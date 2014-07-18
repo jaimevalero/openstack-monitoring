@@ -22,7 +22,6 @@
 #
 # Requirement: curl, netstat
 #
-set -e
 
 STATE_OK=0
 STATE_WARNING=1
@@ -89,12 +88,18 @@ then
     exit $STATE_UNKNOWN
 fi
 
+function getJson() {
+    KEY=$1
+    num=$2
+    awk -F"[,:}]" '{for(i=1;i<=NF;i++){if($i~/'$KEY'\042/){print $(i+1)}}}' | tr -d '"' | sed -n ${num}p | sed 's/^ //'
+}
+
 # Try to get an auth token from keystone API
 KS_RESP=$(curl -s -X 'POST' ${OS_AUTH_URL}/tokens -d '{"auth":{"passwordCredentials":{"username": "'$OS_USERNAME'", "password":"'$OS_PASSWORD'"}, "tenantName":"'$OS_TENANT'"}}' -H 'Content-type: application/json' || true)
 if [ ! -z "${KS_RESP}" ]; then
-    TOKEN=$(echo ${KS_RESP} | python -c "import sys; import json; data = json.loads(sys.stdin.readline()); print data.get('access',{}).get('token',{}).get('id',{})")
-    if [ "${TOKEN}" = "{}" ]; then
-        echo "CRITICAL: Unable to get a valid token from Keystone API"
+    TOKEN=$(echo ${KS_RESP} | getJson id 1)
+    if [ -z "${TOKEN}" ]; then
+        echo "CRITICAL: Unable to get a valid token for tenant ${OS_TENANT} from Keystone API"
         exit $STATE_CRITICAL
     fi
 else
@@ -107,8 +112,8 @@ START=$(date +%s)
 API_RESP=$(curl -s -H "X-Auth-Token: $TOKEN" -H "Content-type: application/json" ${ENDPOINT_URL}/networks || true)
 END=$(date +%s)
 if [ ! -z "${API_RESP}" ]; then
-    NETWORKS=$(echo ${API_RESP} | python -c "import sys; import json; data = json.loads(sys.stdin.readline()); print data.get('networks',{})")
-    if [ "${NETWORKS}" = "{}" ]; then
+    NETWORKS=$(echo ${API_RESP} | getJson networks 1)
+    if [ -z "${NETWORKS}" ]; then
         echo "CRITICAL: Unable to retrieve a network for tenant ${OS_TENANT} from Neutron API"
         exit $STATE_CRITICAL
     fi
